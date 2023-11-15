@@ -1,0 +1,126 @@
+# lily-compiler
+
+Lily (Language-in-language library) is a static ahead-of-time (AOT) JavaScript to C compiler, designed for modern JavaScript.
+
+Lily allows you to seamlessly interop C code with existing JavaScript libraries via WebAssembly, and also compile modern JavaScript programs to platform-native machine code.
+
+Lily is TypeScript-friendly, compatible with Node.js and the browser. Lily is designed to be simple to use, and provide a "batteries included" experience to maximize developer productivity.
+
+## Install
+```sh
+npm install lily-compiler
+```
+
+## Features
+
+Lily can ahead of time (AOT) compile *modern* JavaScript code into C code, with some exceptions. Notably, as there is typically no support for dynamic code evaluation in AOT compiled programs, this means using `eval` or `new Function` constructor is not supported at this time. In the future, we may bundle an optional interpreter (or call out to a separate runtime) to support these features.
+
+Lily makes some intentional design decisions to focus on high-quality modern JavaScript code over degrading performance to support legacy constructs. This means that while most programs may compile fine directly to native code, some of your dependencies that depend on functionality like monkey patching or prototype trickery may not work out of the box without rewriting code. While we may explore preprocessing transforms in the future to support more "bad" code, for now Lily is focused on compiling modern JavaScript code written with good practices.
+
+When importing C libraries and APIs, Lily supports any C library, with the C standard library built-in. 
+
+### Embedding native code into existing JavaScript apps and libraries
+
+Lily Compiler offers a simple library API that you can use to embed native code into your JavaScript programs. It's as simple as wrapping JS code around with a function wrapper.
+
+When used in Node.js or the browser, Lily uses no native dependencies, and only needs a JS environment with WebAssembly. You can pre-compile programs with Node.js and then use them in a browser without needing to compile at runtime in the browser, just like you would compile TypeScript to JavaScript.
+
+As Lily compiles to C as an intermediate, it's easy to import and work with C libraries. Compared to typical WebAssembly toolchains, Lily offers a faster developer experience over the hassle of using clang or a toolchain like Emscripten to compile C code to WebAssembly, where complex glue code is necessary. Instead, you can write C code that feels like a native JavaScript framework.
+
+#### Usage in JavaScript libraries
+Here's a simple example to add two numbers together without using the C standard library. Don't be deceived by the JS syntax, this is compiled to real C code!
+
+```js
+import lily from 'lily-compiler'
+
+const add = lily(function ({ i32 }, numbers) {
+  let sum = i32(0)
+  for (const number of numbers) {
+    sum += number
+    console.log('Adding', number)
+  }
+  return sum
+})
+
+add(1, 2, 3, 4, 5).then(console.log)
+```
+
+Here's another, slightly more complex example, to split a string into an array of strings using the C standard library. Note `string` is special Lily-builtin type to make it easier to work with strings in C similar to C++'s `std::string`.
+
+```js
+const split = lily(function ({ C, addressOf, string }, str, delimiter) {
+  // All types (such as i32 or string) have .fixedArray(size) and .dynamicArray(initialSize?, maxSize?) methods, the latter is a pointer to a dynamically allocated array on the heap in C and the former is a stack-allocated array
+  const result = string.dynamicArray()
+  let start = 0 // non-decimals defaults to i32; decimals defaults to f64
+  let end = 0
+  while (string[end] !== 0) {
+    if (string[end] === delimiter) {
+      let temp = string(/*size*/ end - start)
+      C.strncpy(addressOf(temp), addressOf(str[start]), end - start)
+      start = end + 1
+      result.push(temp)
+    }
+    end++
+  }
+  let temp = string(/*size*/ end - start)
+  C.strncpy(addressOf(temp), addressOf(str[start]), end - start)
+  result.push(temp)
+  return result
+})
+```
+
+### When not to use Lily
+You should not use Lily as a replacement to native Node.js NAPI modules unless the sole purpose of the NAPI module was to enhance performance. Lily is constrained by WebAssembly's lack of access to system calls, and will almost always provide inferior performance to a native NAPI module given overhead
+of the WebAssembly sandbox and communication.
+
+Lily's usage/API design makes trade-offs to provide a seamless high-level developer experience, so for production environments you should consider using a toolchain like Emscripten to compile C code to WebAssembly instead which will give you more control over the low-level details.
+
+## Other usage
+
+### C++ over NPM!
+
+When you run `npx lilyc compile`, all your Lily code functions in the current project will be built into the "include/" folder at the root of your project (where package.json is). When you publish your package to npm, the include/ folder should be included in the package, so you can use Lily compiled code in your C++ projects via npm!
+
+Simply `npm install dependencyName` after running `npm init` (to create a package.json and local `node_modules` dir) in the current root.
+
+Then add either add a "node_modules" symlink to your include/ folder for top level includes,
+or use relative path to find the node_modules folder, where you can include the package's
+C++ headers from.
+
+If you setup a symlink, your include could look like this:
+```cpp
+#include <node_modules/cpp-over-npm/include/lily.h>
+```
+Or with relative pathing, something like this:
+```cpp
+#include "../node_modules/cpp-over-npm/include.lily.h"
+```
+
+Although it's a bit more typing to do relative pathing, it's generally easier to work with (no changes to compiler flags/dealing with symlinks) as the frequency of you moving files around is probably not that high.
+
+## Contributing
+
+
+#### Lily Packages
+
+* `lily-compiler` - the main compiler code for JS to C
+* `lily-crt` - C runtime library for Lily compiled C code to use
+* `lily-cutils` - C utilities for Lily (C code to AST/TypeScript)
+* `lily-ecmagraph` - Generates a whole program graph and Lily IR from JavaScript programs
+* `lily-serializer` - JS \<-> C structure serialization library
+
+### FAQs
+
+#### How does memory management work?
+
+Using a revolutionary technique known as... heap-on-stack! Traditional heap allocations are replaced with pseudo-stack allocations on a separate contiguous heap. This allows for the same performance as stack allocations, but with the flexibility of heap allocations.
+
+
+#### Tips
+
+```sh
+# Get AST as JSON
+clang -Xclang -ast-dump=json -fsyntax-only strlen.c
+# Write LLVM IR to file
+clang -S -g -O0 -emit-llvm strlen.c
+```
