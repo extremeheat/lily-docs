@@ -28,7 +28,7 @@ jobs:
         uses: actions/checkout@v3
       # Install Node.js
       - name: Setup Node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
       # Get the deps
       - name: Install dependencies
         run: npm install
