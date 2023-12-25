@@ -39,7 +39,7 @@ jobs:
         run: npx next export
       # Upload the artifact, so it can be used in the deployment job
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v2
+        uses: actions/upload-pages-artifact@v3
         with:
           path: ./out
 
